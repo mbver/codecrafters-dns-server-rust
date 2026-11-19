@@ -1,18 +1,24 @@
-#[allow(unused_imports)]
 use std::net::UdpSocket;
 
-fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
+use crate::message::{Header, Message};
 
-    // TODO: Uncomment the code below to pass the first stage
+mod message;
+
+fn main() {
+    // when the udp socket is connected, i.e, set the peer address in the kernel filter
+    // we can use recv and send instead of recv_from and send_to
+    // however, packets will be filter by that peer address and send_to another peer will fail
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
-                let response = [];
+                let mut response = Vec::new();
+                let message = Message {
+                    header: Header::stage_reply(),
+                };
+                message.write_to(&mut response);
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
