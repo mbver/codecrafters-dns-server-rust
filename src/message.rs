@@ -89,6 +89,26 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn parse(buf: &[u8]) -> Result<Self, &'static str> {
+        let header = Header::parse(buf)?;
+        let mut offset = 12;
+
+        let mut questions = Vec::with_capacity(header.qdcount as usize);
+        for _ in 0..header.qdcount {
+            questions.push(Question::parse(buf, &mut offset)?);
+        }
+
+        let mut answers = Vec::with_capacity(header.ancount as usize);
+        for _ in 0..header.ancount {
+            answers.push(ResourceRecord::parse(buf, &mut offset)?);
+        }
+
+        Ok(Self {
+            header,
+            questions,
+            answers,
+        })
+    }
     pub fn write_to(&self, out: &mut Vec<u8>) {
         self.header.write_to(out);
         for question in &self.questions {
@@ -100,6 +120,7 @@ impl Message {
     }
 }
 
+#[derive(Clone)]
 pub struct Question {
     pub name: String, // e.g. "codecrafters.io"
     pub qtype: u16,   // 1 = A
@@ -168,6 +189,39 @@ impl ResourceRecord {
         out.extend_from_slice(&rdlength.to_be_bytes());
         out.extend_from_slice(&self.rdata);
     }
+    pub fn parse(buf: &[u8], offset: &mut usize) -> Result<Self, &'static str> {
+        let name = read_domain_name(buf, offset)?;
+
+        if *offset + 10 > buf.len() {
+            return Err("Buffer too short for resource record header");
+        }
+
+        let rtype = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]);
+        let class = u16::from_be_bytes([buf[*offset + 2], buf[*offset + 3]]);
+        let ttl = u32::from_be_bytes([
+            buf[*offset + 4],
+            buf[*offset + 5],
+            buf[*offset + 6],
+            buf[*offset + 7],
+        ]);
+        let rdlength = u16::from_be_bytes([buf[*offset + 8], buf[*offset + 9]]) as usize;
+        *offset += 10;
+
+        if *offset + rdlength > buf.len() {
+            return Err("Buffer too short for resource record RDATA");
+        }
+
+        let rdata = buf[*offset..*offset + rdlength].to_vec();
+        *offset += rdlength;
+
+        Ok(Self {
+            name,
+            rtype,
+            class,
+            ttl,
+            rdata,
+        })
+    }
 }
 
 pub fn write_domain_name(name: &str, out: &mut Vec<u8>) {
@@ -194,6 +248,8 @@ fn read_domain_name(buf: &[u8], offset: &mut usize) -> Result<String, &'static s
         let len = buf[cursor];
 
         // Compression pointer: top 2 bits are 11
+        // move cursor to ptr_offset position and read until 0x00.
+        // that the tail of the whole label and finished
         if (len & 0b1100_0000) == 0b1100_0000 {
             if cursor + 1 >= buf.len() {
                 return Err("Truncated compression pointer");
@@ -211,6 +267,8 @@ fn read_domain_name(buf: &[u8], offset: &mut usize) -> Result<String, &'static s
             }
 
             jumps += 1;
+            // a ptr_offset my point to another postion which might point to another
+            // to avoid malicious loop, exit if max_jumps exceeded
             if jumps > MAX_JUMPS {
                 return Err("Too many compression pointer jumps (possible loop)");
             }
@@ -226,6 +284,7 @@ fn read_domain_name(buf: &[u8], offset: &mut usize) -> Result<String, &'static s
 
         cursor += 1;
 
+        // 0x00: exit loop
         if len == 0 {
             if !jumped {
                 *offset = cursor;
