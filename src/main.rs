@@ -1,6 +1,6 @@
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, UdpSocket};
 
-use crate::message::{Header, Message, Question};
+use crate::message::{Header, Message, Question, ResourceRecord};
 
 mod message;
 
@@ -16,6 +16,7 @@ fn main() {
                 println!("Received {} bytes from {}", size, source);
                 let mut header = Header::stage_reply();
                 header.qdcount = 1;
+                header.ancount = 1;
 
                 let message = Message {
                     header,
@@ -24,6 +25,11 @@ fn main() {
                         qtype: 1,  // A record
                         qclass: 1, // IN class
                     }],
+                    answers: vec![ResourceRecord::a_record(
+                        "codecrafters.io",
+                        60,
+                        Ipv4Addr::new(8, 8, 8, 8),
+                    )],
                 };
                 let mut response = Vec::new();
                 message.write_to(&mut response);

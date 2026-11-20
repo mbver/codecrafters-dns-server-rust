@@ -55,6 +55,7 @@ impl Header {
 pub struct Message {
     pub header: Header,
     pub questions: Vec<Question>,
+    pub answers: Vec<ResourceRecord>,
 }
 
 impl Message {
@@ -62,6 +63,9 @@ impl Message {
         self.header.write_to(out);
         for question in &self.questions {
             question.write_to(out);
+        }
+        for r in &self.answers {
+            r.write_to(out);
         }
     }
 }
@@ -84,4 +88,46 @@ impl Question {
         out.extend_from_slice(&self.qtype.to_be_bytes());
         out.extend_from_slice(&self.qclass.to_be_bytes());
     }
+}
+
+use std::net::Ipv4Addr;
+
+pub struct ResourceRecord {
+    pub name: String,
+    pub rtype: u16,
+    pub class: u16,
+    pub ttl: u32,
+    pub rdata: Vec<u8>,
+}
+
+impl ResourceRecord {
+    pub fn a_record(name: impl Into<String>, ttl: u32, ip: Ipv4Addr) -> Self {
+        Self {
+            name: name.into(),
+            rtype: 1, // A
+            class: 1, // IN
+            ttl,
+            rdata: ip.octets().to_vec(),
+        }
+    }
+
+    pub fn write_to(&self, out: &mut Vec<u8>) {
+        write_domain_name(&self.name, out);
+        out.extend_from_slice(&self.rtype.to_be_bytes());
+        out.extend_from_slice(&self.class.to_be_bytes());
+        out.extend_from_slice(&self.ttl.to_be_bytes());
+
+        let rdlength = u16::try_from(self.rdata.len()).expect("RDATA exceeds u16::MAX");
+        out.extend_from_slice(&rdlength.to_be_bytes());
+        out.extend_from_slice(&self.rdata);
+    }
+}
+
+pub fn write_domain_name(name: &str, out: &mut Vec<u8>) {
+    for label in name.split('.').filter(|s| !s.is_empty()) {
+        let len = u8::try_from(label.len()).expect("DNS label exceeds 63 bytes");
+        out.push(len);
+        out.extend_from_slice(label.as_bytes());
+    }
+    out.push(0);
 }
