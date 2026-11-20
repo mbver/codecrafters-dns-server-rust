@@ -14,7 +14,8 @@ fn main() {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
-                let mut header = Header::stage_reply();
+                let req = Message::parse(&buf[..size]).expect("Failed to parse DNS message");
+                let mut header = Header::reply_from(&req.header);
                 header.qdcount = 1;
                 header.ancount = 1;
 

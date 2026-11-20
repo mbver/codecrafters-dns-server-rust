@@ -15,24 +15,6 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn stage_reply() -> Self {
-        Self {
-            id: 1234,
-            qr: 1,
-            opcode: 0,
-            aa: 0,
-            tc: 0,
-            rd: 0,
-            ra: 0,
-            z: 0,
-            rcode: 0,
-            qdcount: 0,
-            ancount: 0,
-            nscount: 0,
-            arcount: 0,
-        }
-    }
-
     pub fn write_to(&self, out: &mut Vec<u8>) {
         let flags: u16 = ((self.qr as u16 & 0b1) << 15)
             | ((self.opcode as u16 & 0b1111) << 11)
@@ -49,6 +31,54 @@ impl Header {
         out.extend_from_slice(&self.ancount.to_be_bytes());
         out.extend_from_slice(&self.nscount.to_be_bytes());
         out.extend_from_slice(&self.arcount.to_be_bytes());
+    }
+    pub fn parse(buf: &[u8]) -> Result<Self, &'static str> {
+        if buf.len() < 12 {
+            return Err("DNS header must be at least 12 bytes");
+        }
+
+        let id = u16::from_be_bytes([buf[0], buf[1]]);
+        let flags = u16::from_be_bytes([buf[2], buf[3]]);
+        let qdcount = u16::from_be_bytes([buf[4], buf[5]]);
+        let ancount = u16::from_be_bytes([buf[6], buf[7]]);
+        let nscount = u16::from_be_bytes([buf[8], buf[9]]);
+        let arcount = u16::from_be_bytes([buf[10], buf[11]]);
+
+        Ok(Self {
+            id,
+            qr: ((flags >> 15) & 0b1) as u8,
+            opcode: ((flags >> 11) & 0b1111) as u8,
+            aa: ((flags >> 10) & 0b1) as u8,
+            tc: ((flags >> 9) & 0b1) as u8,
+            rd: ((flags >> 8) & 0b1) as u8,
+            ra: ((flags >> 7) & 0b1) as u8,
+            z: ((flags >> 4) & 0b111) as u8,
+            rcode: (flags & 0b1111) as u8,
+            qdcount,
+            ancount,
+            nscount,
+            arcount,
+        })
+    }
+
+    pub fn reply_from(req: &Header) -> Self {
+        let rcode = if req.opcode == 0 { 0 } else { 4 };
+
+        Self {
+            id: req.id,
+            qr: 1,
+            opcode: req.opcode,
+            aa: 0,
+            tc: 0,
+            rd: req.rd,
+            ra: 0,
+            z: 0,
+            rcode,
+            qdcount: 0,
+            ancount: 0,
+            nscount: 0,
+            arcount: 0,
+        }
     }
 }
 
@@ -67,6 +97,14 @@ impl Message {
         for r in &self.answers {
             r.write_to(out);
         }
+    }
+    pub fn parse(buf: &[u8]) -> Result<Self, &'static str> {
+        let header = Header::parse(buf)?;
+        Ok(Self {
+            header,
+            questions: Vec::new(),
+            answers: Vec::new(),
+        })
     }
 }
 
