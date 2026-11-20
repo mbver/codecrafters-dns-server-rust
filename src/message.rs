@@ -54,10 +54,34 @@ impl Header {
 
 pub struct Message {
     pub header: Header,
+    pub questions: Vec<Question>,
 }
 
 impl Message {
     pub fn write_to(&self, out: &mut Vec<u8>) {
         self.header.write_to(out);
+        for question in &self.questions {
+            question.write_to(out);
+        }
+    }
+}
+
+pub struct Question {
+    pub name: String, // e.g. "codecrafters.io"
+    pub qtype: u16,   // 1 = A
+    pub qclass: u16,  // 1 = IN
+}
+
+impl Question {
+    pub fn write_to(&self, out: &mut Vec<u8>) {
+        for label in self.name.split('.').filter(|s| !s.is_empty()) {
+            let len = u8::try_from(label.len()).expect("DNS label exceeds 63 bytes");
+            out.push(len);
+            out.extend_from_slice(label.as_bytes());
+        }
+        out.push(0); // null terminator
+
+        out.extend_from_slice(&self.qtype.to_be_bytes());
+        out.extend_from_slice(&self.qclass.to_be_bytes());
     }
 }

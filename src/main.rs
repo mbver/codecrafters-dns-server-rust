@@ -1,6 +1,6 @@
 use std::net::UdpSocket;
 
-use crate::message::{Header, Message};
+use crate::message::{Header, Message, Question};
 
 mod message;
 
@@ -14,10 +14,18 @@ fn main() {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
-                let mut response = Vec::new();
+                let mut header = Header::stage_reply();
+                header.qdcount = 1;
+
                 let message = Message {
-                    header: Header::stage_reply(),
+                    header,
+                    questions: vec![Question {
+                        name: String::from("codecrafters.io"),
+                        qtype: 1,  // A record
+                        qclass: 1, // IN class
+                    }],
                 };
+                let mut response = Vec::new();
                 message.write_to(&mut response);
                 udp_socket
                     .send_to(&response, source)
