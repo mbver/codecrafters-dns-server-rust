@@ -181,32 +181,67 @@ pub fn write_domain_name(name: &str, out: &mut Vec<u8>) {
 
 fn read_domain_name(buf: &[u8], offset: &mut usize) -> Result<String, &'static str> {
     let mut labels: Vec<String> = Vec::new();
+    let mut cursor = *offset;
+    let mut jumped = false;
+    let mut jumps = 0usize;
+    const MAX_JUMPS: usize = 64;
 
     loop {
-        if *offset >= buf.len() {
+        if cursor >= buf.len() {
             return Err("Unexpected end of buffer while reading domain name");
         }
 
-        let len = buf[*offset];
-        *offset += 1;
+        let len = buf[cursor];
+
+        // Compression pointer: top 2 bits are 11
+        if (len & 0b1100_0000) == 0b1100_0000 {
+            if cursor + 1 >= buf.len() {
+                return Err("Truncated compression pointer");
+            }
+
+            let ptr_offset = (((len & 0b0011_1111) as usize) << 8) | (buf[cursor + 1] as usize);
+            if ptr_offset >= buf.len() {
+                return Err("Compression pointer out of bounds");
+            }
+
+            // Advance the caller's stream offset past the 2-byte pointer only on the first jump
+            if !jumped {
+                *offset = cursor + 2;
+                jumped = true;
+            }
+
+            jumps += 1;
+            if jumps > MAX_JUMPS {
+                return Err("Too many compression pointer jumps (possible loop)");
+            }
+
+            cursor = ptr_offset;
+            continue;
+        }
+
+        // Standard label length (top 2 bits are 00)
+        if (len & 0b1100_0000) != 0 {
+            return Err("Invalid label length prefix");
+        }
+
+        cursor += 1;
 
         if len == 0 {
+            if !jumped {
+                *offset = cursor;
+            }
             break;
         }
 
-        if len & 0b1100_0000 != 0 {
-            return Err("Compressed domain name pointer not yet supported");
-        }
-
         let label_len = len as usize;
-        if *offset + label_len > buf.len() {
+        if cursor + label_len > buf.len() {
             return Err("Label extends past end of buffer");
         }
 
-        let label = std::str::from_utf8(&buf[*offset..*offset + label_len])
+        let label = std::str::from_utf8(&buf[cursor..cursor + label_len])
             .map_err(|_| "Invalid UTF-8 in domain label")?;
         labels.push(label.to_string());
-        *offset += label_len;
+        cursor += label_len;
     }
 
     Ok(labels.join("."))
