@@ -14,26 +14,33 @@ fn main() {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
-                let req = Message::parse(&buf[..size]).expect("Failed to parse DNS message");
-                let mut header = Header::reply_from(&req.header);
-                header.qdcount = 1;
-                header.ancount = 1;
+                let packet = &buf[..size];
+                let req_header = Header::parse(packet).expect("Failed to parse header");
 
-                let message = Message {
-                    header,
-                    questions: vec![Question {
-                        name: String::from("codecrafters.io"),
-                        qtype: 1,  // A record
-                        qclass: 1, // IN class
-                    }],
-                    answers: vec![ResourceRecord::a_record(
-                        "codecrafters.io",
-                        60,
-                        Ipv4Addr::new(8, 8, 8, 8),
-                    )],
+                let mut offset = 12;
+                let mut questions = Vec::with_capacity(req_header.qdcount as usize);
+                for _ in 0..req_header.qdcount {
+                    questions.push(
+                        Question::parse(packet, &mut offset).expect("Failed to parse question"),
+                    );
+                }
+
+                let mut reply_header = Header::reply_from(&req_header);
+                reply_header.qdcount = questions.len() as u16;
+
+                let answers: Vec<ResourceRecord> = questions
+                    .iter()
+                    .map(|q| ResourceRecord::a_record(&q.name, 60, Ipv4Addr::new(8, 8, 8, 8)))
+                    .collect();
+                reply_header.ancount = answers.len() as u16;
+
+                let reply = Message {
+                    header: reply_header,
+                    questions,
+                    answers,
                 };
                 let mut response = Vec::new();
-                message.write_to(&mut response);
+                reply.write_to(&mut response);
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");

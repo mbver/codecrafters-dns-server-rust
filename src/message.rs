@@ -98,14 +98,6 @@ impl Message {
             r.write_to(out);
         }
     }
-    pub fn parse(buf: &[u8]) -> Result<Self, &'static str> {
-        let header = Header::parse(buf)?;
-        Ok(Self {
-            header,
-            questions: Vec::new(),
-            answers: Vec::new(),
-        })
-    }
 }
 
 pub struct Question {
@@ -115,6 +107,23 @@ pub struct Question {
 }
 
 impl Question {
+    pub fn parse(buf: &[u8], offset: &mut usize) -> Result<Self, &'static str> {
+        let name = read_domain_name(buf, offset)?;
+
+        if *offset + 4 > buf.len() {
+            return Err("Buffer too short for question type and class");
+        }
+
+        let qtype = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]);
+        let qclass = u16::from_be_bytes([buf[*offset + 2], buf[*offset + 3]]);
+        *offset += 4;
+
+        Ok(Self {
+            name,
+            qtype,
+            qclass,
+        })
+    }
     pub fn write_to(&self, out: &mut Vec<u8>) {
         for label in self.name.split('.').filter(|s| !s.is_empty()) {
             let len = u8::try_from(label.len()).expect("DNS label exceeds 63 bytes");
@@ -168,4 +177,37 @@ pub fn write_domain_name(name: &str, out: &mut Vec<u8>) {
         out.extend_from_slice(label.as_bytes());
     }
     out.push(0);
+}
+
+fn read_domain_name(buf: &[u8], offset: &mut usize) -> Result<String, &'static str> {
+    let mut labels: Vec<String> = Vec::new();
+
+    loop {
+        if *offset >= buf.len() {
+            return Err("Unexpected end of buffer while reading domain name");
+        }
+
+        let len = buf[*offset];
+        *offset += 1;
+
+        if len == 0 {
+            break;
+        }
+
+        if len & 0b1100_0000 != 0 {
+            return Err("Compressed domain name pointer not yet supported");
+        }
+
+        let label_len = len as usize;
+        if *offset + label_len > buf.len() {
+            return Err("Label extends past end of buffer");
+        }
+
+        let label = std::str::from_utf8(&buf[*offset..*offset + label_len])
+            .map_err(|_| "Invalid UTF-8 in domain label")?;
+        labels.push(label.to_string());
+        *offset += label_len;
+    }
+
+    Ok(labels.join("."))
 }
